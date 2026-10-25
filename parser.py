@@ -9,27 +9,26 @@ from langdetect import detect, DetectorFactory
 DetectorFactory.seed = 0
 
 # Настройки
-MAX_ARTICLES_PER_RUN = 5  # Сколько русскоязычных статей сохранить за один запуск
+MAX_ARTICLES_PER_RUN = 3  # Сколько статей сохранять за один запуск
 OUTPUT_DIR = "articles"
 
-# Шаблоны для генерации случайных поисковых запросов в зоне .ru
-SEARCH_PATTERNS = [
-    "ru/*", "ru/article/*", "ru/blog/*", "ru/news/*", 
-    "ru/stati/*", "ru/posts/*", "ru/paper/*", "ru/entry/*"
+# Список популярных русскоязычных платформ и СМИ в веб-архиве
+DOMAINS = [
+    "habr.com", "vc.ru", "pikabu.ru", "lenta.ru", 
+    "ria.ru", "gazeta.ru", "kommersant.ru", "argumenti.ru"
 ]
 
-def get_random_wayback_urls(limit_fetch=30):
-    """Генерирует случайные ссылки из веб-архива в зоне .ru"""
-    pattern = random.choice(SEARCH_PATTERNS)
-    random_offset = random.randint(0, 1000)
-    
+def get_wayback_urls_for_domain(domain):
+    """Получает снимки страниц из веб-архива для конкретного домена за случайный год"""
+    random_year = random.randint(2012, 2021)
     cdx_url = (
         f"https://web.archive.org/cdx/search/cdx?"
-        f"url=*.{pattern}&output=json&filter=statuscode:200"
-        f"&filter=mimetype:text/html&collapse=urlkey"
-        f"&limit={limit_fetch}&offset={random_offset}"
+        f"url={domain}/*&from={random_year}0101&to={random_year}1231"
+        f"&output=json&filter=statuscode:200&filter=mimetype:text/html"
+        f"&collapse=urlkey&limit=30"
     )
     
+    print(f"Запрос к CDX API для домена {domain} ({random_year} год)...")
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     try:
         response = requests.get(cdx_url, headers=headers, timeout=20)
@@ -49,40 +48,42 @@ def get_random_wayback_urls(limit_fetch=30):
                     results.append({'original': original_url, 'wayback': wayback_url})
                 
                 random.shuffle(results)
+                print(f"Найдено ссылок для {domain}: {len(results)}")
                 return results
     except Exception as e:
-        print(f"Ошибка обращения к CDX API: {e}")
+        print(f"Ошибка при запросе CDX API: {e}")
     return []
 
 def extract_article_content(wayback_url):
-    """Скачивает страницу, очищает и проверяет язык"""
+    """Скачивает страницу и извлекает чистый текст статьи"""
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     try:
-        resp = requests.get(wayback_url, headers=headers, timeout=20)
+        resp = requests.get(wayback_url, headers=headers, timeout=15)
         if resp.status_code != 200:
             return None
         
         soup = BeautifulSoup(resp.text, 'html.parser')
         
-        # Удаляем мусор, скрипты, панели веб-архива
+        # Удаляем мусор, скрипты, рекламу, шапки и панели веб-архива
         for tag in soup(["script", "style", "nav", "footer", "header", "aside", "form", "iframe", "noscript"]):
             tag.decompose()
         
         for wm_tag in soup.find_all(id=re.compile(r'wm-.*|wm-ipp.*')):
             wm_tag.decompose()
 
-        # Заголовок
+        # Ищем заголовок
         title_tag = soup.find('h1') or soup.find('title')
         title = title_tag.get_text(strip=True) if title_tag else "Без названия"
 
-        # Текст
-        paragraphs = [p.get_text(strip=True) for p in soup.find_all('p') if len(p.get_text(strip=True)) > 40]
+        # Собираем абзацы текста
+        paragraphs = [p.get_text(strip=True) for p in soup.find_all('p') if len(p.get_text(strip=True)) > 30]
         text = "\n\n".join(paragraphs)
 
-        if len(text) < 300:
+        # Проверка минимальной длины текста (не менее 400 символов)
+        if len(text) < 400:
             return None
 
-        # Проверка на русский язык
+        # Проверка языка (должен быть русский)
         try:
             lang = detect(text[:1000])
             if lang != 'ru':
@@ -93,28 +94,31 @@ def extract_article_content(wayback_url):
         return {'title': title, 'text': text}
 
     except Exception as e:
-        print(f"Ошибка при парсинге {wayback_url}: {e}")
+        print(f"Ошибка при парсинге страницы: {e}")
         return None
 
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     saved_count = 0
-    attempts = 0
     
-    print("Ищем случайные статьи на русском языке в Веб-Архиве...")
+    # Перемешиваем список доменов для разнообразия
+    shuffled_domains = DOMAINS.copy()
+    random.shuffle(shuffled_domains)
 
-    while saved_count < MAX_ARTICLES_PER_RUN and attempts < 3:
-        attempts += 1
-        urls = get_random_wayback_urls(limit_fetch=40)
-        
+    for domain in shuffled_domains:
+        if saved_count >= MAX_ARTICLES_PER_RUN:
+            break
+            
+        urls = get_wayback_urls_for_domain(domain)
         for item in urls:
             if saved_count >= MAX_ARTICLES_PER_RUN:
                 break
                 
-            print(f"Проверяем: {item['original']}")
+            print(f"Проверяем URL: {item['original']}")
             article = extract_article_content(item['wayback'])
             
             if article:
+                # Очищаем заголовок для имени файла
                 clean_title = re.sub(r'[^\w\s-]', '', article['title'])[:40].strip()
                 safe_name = clean_title if clean_title else f"article_{random.randint(1000, 9999)}"
                 filepath = os.path.join(OUTPUT_DIR, f"{safe_name}.txt")
@@ -129,10 +133,10 @@ def main():
                     f.write("=" * 60 + "\n\n")
                     f.write(article['text'])
 
-                print(f" -> СОХРАНЕНО: {filepath}")
+                print(f" -> УСПЕШНО СОХРАНЕНО: {filepath}")
                 saved_count += 1
 
-    print(f"\nГотово! Сохранено статей на русском языке: {saved_count}")
+    print(f"\nГотово! Всего сохранено новых статей: {saved_count}")
 
 if __name__ == "__main__":
     main()
