@@ -1,22 +1,22 @@
-name: Wayback Machine Parser
+name: Auto RU Wayback Parser
 
 on:
-  workflow_dispatch: # Кнопка ручного запуска во вкладке Actions
+  workflow_dispatch: # Кнопка ручного запуска
   schedule:
-    - cron: '0 0 * * 1' # Запуск каждый понедельник в 00:00 UTC
+    - cron: '0 */6 * * *' # Автозапуск каждые 6 часов
 
 jobs:
   run-parser:
     runs-on: ubuntu-latest
     
     permissions:
-      contents: write # Важно: дает права на запись файлов обратно в репозиторий
+      contents: write # Дает права боту коммитить файлы назад в репозиторий
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
@@ -26,13 +26,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run parser script
+      - name: Run RU Parser
         run: python parser.py
 
-      - name: Commit and push changes
+      - name: Commit & Push Parsed Articles
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.io"
           git add articles/
-          git commit -m "Auto-update: added new parsed articles from Wayback Machine" || echo "Нет новых изменений для коммита"
+          git commit -m "Auto-parse: Добавлены новые русскоязычные статьи из Веб-Архива" || echo "Нет новых статей для коммита"
           git push
