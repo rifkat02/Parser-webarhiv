@@ -1,0 +1,38 @@
+name: Wayback Machine Parser
+
+on:
+  workflow_dispatch: # Кнопка ручного запуска во вкладке Actions
+  schedule:
+    - cron: '0 0 * * 1' # Запуск каждый понедельник в 00:00 UTC
+
+jobs:
+  run-parser:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write # Важно: дает права на запись файлов обратно в репозиторий
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run parser script
+        run: python parser.py
+
+      - name: Commit and push changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.io"
+          git add articles/
+          git commit -m "Auto-update: added new parsed articles from Wayback Machine" || echo "Нет новых изменений для коммита"
+          git push
